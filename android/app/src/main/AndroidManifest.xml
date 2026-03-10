@@ -11,7 +11,8 @@
         android:label="2Block Music"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
-        android:requestLegacyExternalStorage="true">
+        android:allowBackup="false"
+        android:usesCleartextTraffic="false">
         
         <activity
             android:name=".MainActivity"
@@ -29,6 +30,27 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+
+            <!-- Deep link Supabase email confirmation -->
+            <intent-filter android:autoVerify="false">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="mymusic"
+                    android:host="auth-callback"/>
+            </intent-filter>
+
+            <!-- App Links HTTPS (recommended in production with assetlinks.json) -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="2block-web-ctth.vercel.app"
+                    android:pathPrefix="/auth-callback"/>
             </intent-filter>
         </activity>
         
@@ -53,6 +75,13 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2"/>
+
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_channel_id"
+            android:value="2block_push_channel"/>
+        <meta-data
+            android:name="com.google.firebase.messaging.default_notification_icon"
+            android:resource="@mipmap/ic_launcher"/>
     </application>
     
 </manifest>

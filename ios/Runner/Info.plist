@@ -49,5 +49,18 @@
 	<array>
 		<string>audio</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLName</key>
+			<string>mymusic.auth</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>mymusic</string>
+			</array>
+		</dict>
+	</array>
 </dict>
 </plist>

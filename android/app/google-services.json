@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "466433244520",
+    "project_id": "block-music-push",
+    "storage_bucket": "block-music-push.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:466433244520:android:36b82000d7673d6e316add",
+        "android_client_info": {
+          "package_name": "com.example.my_music"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDcdtptyXwk5jKnlTJo1Kn6-ILr6fxqS1o"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
