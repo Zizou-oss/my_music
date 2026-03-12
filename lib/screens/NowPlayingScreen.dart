@@ -17,6 +17,7 @@ import '../models/song_social.dart';
 import '../player/audio_handler.dart';
 import '../services/auth_service.dart';
 import '../services/song_social_service.dart';
+import '../services/tutorial_service.dart';
 import 'auth_screen.dart';
 
 //  2Block Design Tokens
@@ -79,6 +80,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
   final AudioHandler _handler = AudioHandler();
   final AuthService _authService = AuthService();
   final SongSocialService _songSocialService = SongSocialService();
+  final TutorialService _tutorialService = TutorialService();
   final PageController _pageController = PageController();
   final ScrollController _lyricsScrollController = ScrollController();
   final Map<int, GlobalKey> _lyricLineKeys = <int, GlobalKey>{};
@@ -154,6 +156,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     unawaited(_loadFavorites());
     unawaited(_loadSongSocialStats(widget.song.id));
     unawaited(_loadCommentPreview(widget.song.id));
+    unawaited(_maybeShowNowPlayingTutorial());
 
     _playerStateSub = _handler.player.playerStateStream.listen((state) {
       if (!mounted) return;
@@ -169,11 +172,168 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     if (_handler.currentSong?.id != widget.song.id) {
       _handler.playSong(widget.song).catchError((_) {
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Lecture impossible pour ce morceau')),
-        );
+        _showSnack('Lecture impossible pour ce morceau');
       });
     }
+  }
+
+  Future<void> _maybeShowNowPlayingTutorial() async {
+    final seen = await _tutorialService.hasSeenNowPlayingTutorial();
+    if (!mounted || seen) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      if (!mounted) return;
+      await _showNowPlayingTutorial();
+      if (!mounted) return;
+      await _tutorialService.markNowPlayingTutorialSeen();
+    });
+  }
+
+  Future<void> _showNowPlayingTutorial() async {
+    final isLightTheme = Theme.of(context).brightness == Brightness.light;
+    await showModalBottomSheet<void>(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) => ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(24)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            decoration: BoxDecoration(
+              color: isLightTheme
+                  ? Colors.white.withOpacity(0.96)
+                  : const Color(0xFF0f0f17).withOpacity(0.95),
+              border: Border.all(
+                color: isLightTheme
+                    ? const Color(0xFFE2E6F0)
+                    : Colors.white.withOpacity(0.08),
+              ),
+            ),
+            child: SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 44,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: isLightTheme
+                              ? const Color(0xFFD0D5E3)
+                              : _C.gray500.withOpacity(0.5),
+                          borderRadius: BorderRadius.circular(99),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Text(
+                      'D\u00E9couvrir le lecteur',
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w800,
+                        color: isLightTheme
+                            ? const Color(0xFF1A1F2D)
+                            : _C.white,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Les actions principales sont ici :',
+                      style: TextStyle(
+                        fontSize: 13,
+                        color: isLightTheme
+                            ? const Color(0xFF6C7388)
+                            : _C.gray400,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    _tutorialRow(
+                      icon: Icons.swipe_rounded,
+                      text: 'Balaye la cover pour voir les paroles.',
+                    ),
+                    _tutorialRow(
+                      icon: Icons.favorite_rounded,
+                      text:
+                          'Appuie sur le c\u0153ur pour liker tes songs favoris.',
+                    ),
+                    _tutorialRow(
+                      icon: Icons.equalizer_rounded,
+                      text: 'Le menu ouvre l\'\u00E9galiseur et les options.',
+                    ),
+                    _tutorialRow(
+                      icon: Icons.comment_rounded,
+                      text:
+                          'Fais d\u00E9filer vers le bas pour voir les commentaires.',
+                    ),
+                    const SizedBox(height: 18),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.pop(context),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _C.v500,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        child: const Text('Compris'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _tutorialRow({
+    required IconData icon,
+    required String text,
+  }) {
+    final isLightTheme = Theme.of(context).brightness == Brightness.light;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 34,
+            height: 34,
+            decoration: BoxDecoration(
+              color: isLightTheme
+                  ? const Color(0xFFF1F3F9)
+                  : Colors.white.withOpacity(0.08),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Icon(
+              icon,
+              size: 18,
+              color: isLightTheme ? const Color(0xFF1A1F2D) : _C.white,
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 13,
+                height: 1.4,
+                color:
+                    isLightTheme ? const Color(0xFF454D62) : _C.gray400,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _loadFavorites() async {
@@ -204,6 +364,31 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
 
   bool get _isLoggedIn => _authService.currentUser != null;
 
+  void _showSnack(String msg) {
+    final isLightTheme = Theme.of(context).brightness == Brightness.light;
+    final topInset = MediaQuery.of(context).padding.top;
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+        msg,
+        style: TextStyle(
+          color: isLightTheme ? const Color(0xFF161616) : _C.white,
+          fontWeight: FontWeight.w500,
+        ),
+      ),
+      backgroundColor: isLightTheme ? Colors.white : const Color(0xFF1a1a2e),
+      behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.fromLTRB(16, topInset + 12, 16, 0),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(14),
+        side: BorderSide(
+          color:
+              isLightTheme ? const Color(0xFFE7E9F0) : _C.v500.withOpacity(0.4),
+        ),
+      ),
+      duration: const Duration(seconds: 2),
+    ));
+  }
+
   Future<void> _openAuthScreen() async {
     final result = await Navigator.push<String>(
       context,
@@ -212,9 +397,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     if (!mounted) return;
     final message = result?.trim();
     if (message != null && message.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      _showSnack(message);
     }
   }
 
@@ -224,8 +407,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     if (!mounted || _socialSongId != songId) return;
     final stats = statsBySong[songId] ??
         SongSocialStats(songId: songId, likesCount: 0, commentsCount: 0);
-    if (stats.hasLiked && !_favoriteIds.contains(songId)) {
-      unawaited(_setFavoriteState(songId, true));
+    if (_isFavoriteId(songId) != stats.hasLiked) {
+      unawaited(_setFavoriteState(songId, stats.hasLiked));
     }
     setState(() {
       _socialStats = stats;
@@ -312,31 +495,51 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
   }
 
   Future<void> _toggleFavoriteLike(Song song) async {
-    final nextIsFavorite = !_isFavorite(song);
-    await _setFavoriteState(song.id, nextIsFavorite);
-
-    if (!_isLoggedIn) return;
-
-    final stats = _socialStats;
-    final shouldLike = nextIsFavorite;
-    if (stats != null && stats.hasLiked == shouldLike) {
+    final previousFavorite = _isFavorite(song);
+    if (!_isLoggedIn) {
+      await _setFavoriteState(song.id, !previousFavorite);
       return;
     }
+
+    final previousStats =
+        _socialStats ??
+        SongSocialStats(
+          songId: song.id,
+          likesCount: 0,
+          commentsCount: 0,
+          hasLiked: previousFavorite,
+        );
+    final previousLiked = previousStats.hasLiked;
+    final nextLiked = !previousLiked;
+    await _setFavoriteState(song.id, nextLiked);
+
+    setState(() {
+      final nextLikes =
+          (previousStats.likesCount + (nextLiked ? 1 : -1)).clamp(0, 1 << 30);
+      _socialStats = previousStats.copyWith(
+        hasLiked: nextLiked,
+        likesCount: nextLikes,
+      );
+    });
 
     final updated = await _songSocialService.toggleLike(song.id);
     if (!mounted) return;
     if (updated == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Impossible d enregistrer le like.')),
-      );
+      await _setFavoriteState(song.id, previousLiked);
+      setState(() {
+        _socialStats = previousStats;
+      });
       return;
     }
 
+    await _setFavoriteState(song.id, updated.hasLiked);
     setState(() {
       _socialStats = updated;
       _socialSongId = song.id;
     });
   }
+
+  bool _isFavoriteId(int songId) => _favoriteIds.contains(songId);
 
   Future<void> _openCommentsSheet(Song song) async {
     final isLightTheme = Theme.of(context).brightness == Brightness.light;
@@ -358,9 +561,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     Future<void> submitComment(StateSetter setModalState) async {
       final message = commentCtrl.text.trim();
       if (message.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('Ecris un commentaire avant d envoyer.')),
-        );
+        _showSnack('Ecris un commentaire avant d envoyer.');
         return;
       }
       if (!_isLoggedIn) {
@@ -372,9 +573,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
       final error = await _songSocialService.addComment(song.id, message);
       if (!mounted) return;
       if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error)),
-        );
+        _showSnack(error);
         setModalState(() => isSending = false);
         return;
       }
@@ -394,9 +593,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
       final error = await _songSocialService.deleteComment(comment.id);
       if (!mounted) return;
       if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error)),
-        );
+        _showSnack(error);
         return;
       }
       await loadComments(setModalState);
@@ -1139,12 +1336,8 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
       }
     } on MissingPluginException {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text(
-            'Partage non initialis\u00E9. Red\u00E9marre compl\u00E8tement l\u2019application.',
-          ),
-        ),
+      _showSnack(
+        'Partage non initialis\u00E9. Red\u00E9marre compl\u00E8tement l\u2019application.',
       );
       return;
     } catch (_) {
@@ -1163,13 +1356,7 @@ class _NowPlayingScreenState extends State<NowPlayingScreen>
     if (!mounted) return;
     await Clipboard.setData(ClipboardData(text: text));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Partage indisponible. Texte copi\u00E9 dans le presse-papiers.',
-        ),
-      ),
-    );
+    _showSnack('Partage indisponible. Texte copi\u00E9 dans le presse-papiers.');
   }
 
   Future<void> _openIssueReport(Song song) async {
@@ -1306,12 +1493,8 @@ Envoy\u00E9 depuis l'application 2Block Music
     final fallbackText = 'Sujet: $subject\n\n$body';
     await Clipboard.setData(ClipboardData(text: fallbackText));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'Aucune app mail trouv\u00E9e. Le message a \u00E9t\u00E9 copi\u00E9 dans le presse-papiers.',
-        ),
-      ),
+    _showSnack(
+      'Aucune app mail trouv\u00E9e. Le message a \u00E9t\u00E9 copi\u00E9 dans le presse-papiers.',
     );
   }
 
@@ -1336,18 +1519,13 @@ Je signale un probl\u00E8me sur ce morceau :
 
     await Clipboard.setData(ClipboardData(text: message));
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text(
-          'WhatsApp indisponible. Le message a \u00E9t\u00E9 copi\u00E9 dans le presse-papiers.',
-        ),
-      ),
+    _showSnack(
+      'WhatsApp indisponible. Le message a \u00E9t\u00E9 copi\u00E9 dans le presse-papiers.',
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final messenger = ScaffoldMessenger.of(context);
     final currentSong = _handler.currentSong ?? widget.song;
     final isLightTheme = Theme.of(context).brightness == Brightness.light;
     _ensureSongSocialState(currentSong);
@@ -1450,8 +1628,8 @@ Je signale un probl\u00E8me sur ce morceau :
               ),
               FadeTransition(
                 opacity: _entranceFade,
-                child: SlideTransition(
-                  position: _entranceSlide,
+                  child: SlideTransition(
+                    position: _entranceSlide,
                   child: SingleChildScrollView(
                     physics: const BouncingScrollPhysics(),
                     child: Column(
@@ -1474,7 +1652,7 @@ Je signale un probl\u00E8me sur ce morceau :
                         const SizedBox(height: 28),
                         Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 20),
-                          child: _buildControlsBar(messenger, currentSong),
+                          child: _buildControlsBar(currentSong),
                         ),
                         const SizedBox(height: 24),
                         Padding(
@@ -1975,6 +2153,7 @@ Je signale un probl\u00E8me sur ce morceau :
   Widget _buildSongInfo(Song song) {
     final isLightTheme = Theme.of(context).brightness == Brightness.light;
     final isFavorite = _isFavorite(song);
+    final likesCount = _socialStats?.likesCount ?? 0;
     return Row(
       children: [
         Expanded(
@@ -2015,32 +2194,46 @@ Je signale un probl\u00E8me sur ce morceau :
             ],
           ),
         ),
-        GestureDetector(
-          onTap: () => unawaited(_toggleFavoriteLike(song)),
-          child: Container(
-            width: 42,
-            height: 42,
-            decoration: BoxDecoration(
-              color: isLightTheme
-                  ? const Color(0xFFF1F3F9)
-                  : Colors.white.withOpacity(0.05),
-              borderRadius: BorderRadius.circular(12),
-              border: Border.all(
-                color: isLightTheme
-                    ? const Color(0xFFE2E6F0)
-                    : Colors.white.withOpacity(0.08),
+        Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            GestureDetector(
+              onTap: () => unawaited(_toggleFavoriteLike(song)),
+              child: Container(
+                width: 42,
+                height: 42,
+                decoration: BoxDecoration(
+                  color: isLightTheme
+                      ? const Color(0xFFF1F3F9)
+                      : Colors.white.withOpacity(0.05),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: isLightTheme
+                        ? const Color(0xFFE2E6F0)
+                        : Colors.white.withOpacity(0.08),
+                  ),
+                ),
+                child: Icon(
+                  isFavorite
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  color: isFavorite
+                      ? _C.v500
+                      : (isLightTheme ? const Color(0xFF636C83) : _C.gray400),
+                  size: 20,
+                ),
               ),
             ),
-            child: Icon(
-              isFavorite
-                  ? Icons.favorite_rounded
-                  : Icons.favorite_border_rounded,
-              color: isFavorite
-                  ? _C.v500
-                  : (isLightTheme ? const Color(0xFF636C83) : _C.gray400),
-              size: 20,
+            const SizedBox(height: 6),
+            Text(
+              '$likesCount',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w700,
+                color: isLightTheme ? const Color(0xFF7A8197) : _C.gray500,
+              ),
             ),
-          ),
+          ],
         ),
       ],
     );
@@ -2050,162 +2243,152 @@ Je signale un probl\u00E8me sur ce morceau :
     final isLightTheme = Theme.of(context).brightness == Brightness.light;
     final commentsCount =
         _socialStats?.commentsCount ?? _commentPreviewComments.length;
+    final isPreviewLoading =
+        _commentsPreviewSongId == song.id && _commentsPreviewLoading;
+    final previewText = isPreviewLoading
+        ? 'Chargement des commentaires...'
+        : 'Ecrire un commentaire...';
 
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(24),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          width: double.infinity,
-          padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
-          decoration: BoxDecoration(
-            color: isLightTheme
-                ? Colors.white.withOpacity(0.88)
-                : Colors.white.withOpacity(0.05),
-            borderRadius: BorderRadius.circular(24),
-            border: Border.all(
+    return GestureDetector(
+      onTap: () => unawaited(_openCommentsSheet(song)),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(24),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.fromLTRB(18, 18, 18, 16),
+            decoration: BoxDecoration(
               color: isLightTheme
-                  ? const Color(0xFFE2E6F0)
-                  : Colors.white.withOpacity(0.08),
-            ),
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Commentaires',
-                          style: TextStyle(
-                            fontSize: 17,
-                            fontWeight: FontWeight.w800,
-                            color: isLightTheme
-                                ? const Color(0xFF1A1F2D)
-                                : _C.white,
-                          ),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          '$commentsCount commentaire${commentsCount > 1 ? 's' : ''}',
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w600,
-                            color: isLightTheme
-                                ? const Color(0xFF7A8197)
-                                : _C.gray500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  TextButton(
-                    onPressed: () => unawaited(_openCommentsSheet(song)),
-                    child: const Text('Voir tout'),
-                  ),
-                ],
+                  ? Colors.white.withOpacity(0.92)
+                  : Colors.white.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(
+                color: isLightTheme
+                    ? const Color(0xFFE2E6F0)
+                    : Colors.white.withOpacity(0.08),
               ),
-              const SizedBox(height: 12),
-              if (_commentsPreviewLoading)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 12),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (_commentPreviewComments.isEmpty)
-                Text(
-                  'Aucun commentaire pour le moment. Lance la conversation.',
-                  style: TextStyle(
-                    fontSize: 13,
-                    height: 1.5,
-                    color: isLightTheme
-                        ? const Color(0xFF707A92)
-                        : _C.gray400,
-                  ),
-                )
-              else
-                Column(
-                  children: _commentPreviewComments
-                      .map(
-                        (comment) => Container(
-                          width: double.infinity,
-                          margin: const EdgeInsets.only(bottom: 10),
-                          padding: const EdgeInsets.all(14),
-                          decoration: BoxDecoration(
-                            color: isLightTheme
-                                ? const Color(0xFFF6F7FB)
-                                : Colors.white.withOpacity(0.04),
-                            borderRadius: BorderRadius.circular(18),
-                            border: Border.all(
+              boxShadow: [
+                BoxShadow(
+                  color: isLightTheme
+                      ? const Color(0x1A2B2F3A)
+                      : Colors.black.withOpacity(0.4),
+                  blurRadius: 18,
+                  offset: const Offset(0, 10),
+                ),
+              ],
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 36,
+                      height: 36,
+                      decoration: BoxDecoration(
+                        gradient: _C.gradBtn,
+                        borderRadius: BorderRadius.circular(12),
+                        boxShadow: [
+                          BoxShadow(
+                            color: _C.p500.withOpacity(0.35),
+                            blurRadius: 12,
+                            offset: const Offset(0, 6),
+                          ),
+                        ],
+                      ),
+                      child: const Icon(
+                        Icons.mode_comment_rounded,
+                        color: Colors.white,
+                        size: 18,
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Commentaires',
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
                               color: isLightTheme
-                                  ? const Color(0xFFE2E6F0)
-                                  : Colors.white.withOpacity(0.06),
+                                  ? const Color(0xFF1A1F2D)
+                                  : _C.white,
                             ),
                           ),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Row(
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      comment.userName,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: isLightTheme
-                                            ? const Color(0xFF1A1F2D)
-                                            : _C.white,
-                                      ),
-                                    ),
-                                  ),
-                                  Text(
-                                    _fmtDate(comment.createdAt),
-                                    style: TextStyle(
-                                      fontSize: 11,
-                                      color: isLightTheme
-                                          ? const Color(0xFF7A8197)
-                                          : _C.gray500,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                              const SizedBox(height: 8),
-                              Text(
-                                comment.body,
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  height: 1.45,
-                                  color: isLightTheme
-                                      ? const Color(0xFF454D62)
-                                      : _C.gray400,
-                                ),
-                              ),
-                            ],
+                          const SizedBox(height: 2),
+                          Text(
+                            'Touchez pour ouvrir',
+                            style: TextStyle(
+                              fontSize: 11.5,
+                              fontWeight: FontWeight.w600,
+                              color: isLightTheme
+                                  ? const Color(0xFF7A8197)
+                                  : _C.gray500,
+                            ),
                           ),
+                        ],
+                      ),
+                    ),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      decoration: BoxDecoration(
+                        color: isLightTheme
+                            ? const Color(0xFFF1F3F9)
+                            : Colors.white.withOpacity(0.08),
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        '$commentsCount',
+                        style: TextStyle(
+                          fontSize: 12,
+                          fontWeight: FontWeight.w700,
+                          color: isLightTheme
+                              ? const Color(0xFF1A1F2D)
+                              : _C.white,
                         ),
-                      )
-                      .toList(),
+                      ),
+                    ),
+                  ],
                 ),
-              const SizedBox(height: 6),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: () => unawaited(_openCommentsSheet(song)),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _C.v500,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(vertical: 13),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
+                const SizedBox(height: 12),
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 10,
+                  ),
+                  decoration: BoxDecoration(
+                    color: isLightTheme
+                        ? const Color(0xFFF6F7FB)
+                        : Colors.white.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: isLightTheme
+                          ? const Color(0xFFE2E6F0)
+                          : Colors.white.withOpacity(0.06),
                     ),
                   ),
-                  child: const Text('Ouvrir les commentaires'),
+                  child: Text(
+                    previewText,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      height: 1.4,
+                      color: isLightTheme
+                          ? const Color(0xFF6C7388)
+                          : _C.gray400,
+                    ),
+                  ),
                 ),
-              ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -2266,7 +2449,7 @@ Je signale un probl\u00E8me sur ce morceau :
   }
 
   //  Controls Bar
-  Widget _buildControlsBar(ScaffoldMessengerState messenger, Song currentSong) {
+  Widget _buildControlsBar(Song currentSong) {
     final isLightTheme = Theme.of(context).brightness == Brightness.light;
     return ClipRRect(
       borderRadius: BorderRadius.circular(28),
@@ -2327,10 +2510,9 @@ Je signale un probl\u00E8me sur ce morceau :
                             .playSong(_handler.currentSong ?? widget.song)
                             .catchError((_) {
                           if (!mounted) return;
-                          messenger.showSnackBar(const SnackBar(
-                            content: Text(
-                                'T\u00E9l\u00E9charge le son avant la lecture'),
-                          ));
+                          _showSnack(
+                            'T\u00E9l\u00E9charge le son avant la lecture',
+                          );
                         });
                       }
                     },

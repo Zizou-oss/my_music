@@ -190,6 +190,16 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
     if (!await _ensureOnline()) return;
     setState(() => _isLoading = true);
+    final availabilityError = await _authService.checkSignupAvailability(
+      email: email,
+      fullName: name,
+    );
+    if (!mounted) return;
+    if (availabilityError != null) {
+      setState(() => _isLoading = false);
+      _snack(availabilityError);
+      return;
+    }
     final err = await _authService.signUp(
       email: email,
       password: pass,
@@ -213,25 +223,6 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     );
   }
 
-  String? _validateStrongPassword(String password) {
-    if (password.length < 8) {
-      return 'Le mot de passe doit contenir au moins 8 caractères';
-    }
-    if (!RegExp(r'[A-Z]').hasMatch(password)) {
-      return 'Ajoute au moins une lettre majuscule';
-    }
-    if (!RegExp(r'[a-z]').hasMatch(password)) {
-      return 'Ajoute au moins une lettre minuscule';
-    }
-    if (!RegExp(r'\d').hasMatch(password)) {
-      return 'Ajoute au moins un chiffre';
-    }
-    if (!RegExp(r'[^A-Za-z0-9]').hasMatch(password)) {
-      return 'Ajoute au moins un caractère spécial';
-    }
-    return null;
-  }
-
   void _toggleMode() {
     setState(() {
       _isSignUpMode = !_isSignUpMode;
@@ -239,6 +230,25 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
       _obscurePass = true;
       _obscureSignUpPass = true;
     });
+  }
+
+  String? _validateStrongPassword(String password) {
+    if (password.length < 8) {
+      return 'Mot de passe trop faible';
+    }
+    if (!RegExp(r'[A-Z]').hasMatch(password)) {
+      return 'Mot de passe trop faible';
+    }
+    if (!RegExp(r'[a-z]').hasMatch(password)) {
+      return 'Mot de passe trop faible';
+    }
+    if (!RegExp(r'\d').hasMatch(password)) {
+      return 'Mot de passe trop faible';
+    }
+    if (!RegExp(r'[^A-Za-z0-9]').hasMatch(password)) {
+      return 'Mot de passe trop faible';
+    }
+    return null;
   }
 
   Future<void> _signInGoogle() async {
@@ -276,6 +286,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
   void _snack(String msg) {
     final isLightTheme = Theme.of(context).brightness == Brightness.light;
+    final topInset = MediaQuery.of(context).padding.top;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(msg,
           style: TextStyle(
@@ -283,6 +294,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
               fontWeight: FontWeight.w500)),
       backgroundColor: isLightTheme ? Colors.white : const Color(0xFF1a1a2e),
       behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.fromLTRB(16, topInset + 12, 16, 0),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(
@@ -361,9 +373,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
 
                       // Footer
                       Text(
-                        _isSignUpMode
-                            ? 'Un mail de confirmation sera envoyé pour finaliser la création du compte.'
-                            : 'Connecte-toi à ton compte pour pouvoir télécharger les sons',
+                        'Connecte-toi à ton compte pour pouvoir télécharger les sons',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           fontSize: 12,
@@ -427,7 +437,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
         ),
         const SizedBox(height: 6),
         Text(
-          _isSignUpMode ? 'Créer ton compte' : 'Connexion à ton compte',
+          'Connexion à ton compte',
           style: TextStyle(
             fontSize: 14,
             color: isLightTheme ? const Color(0xFF7A8197) : _C.gray500,
@@ -472,17 +482,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              if (_isSignUpMode) ...[
-                _buildField(
-                  controller: _nameCtrl,
-                  focusNode: _nameFocus,
-                  isFocused: _nameFocused,
-                  label: 'Nom utilisateur',
-                  icon: Icons.person_outline_rounded,
-                  textCapitalization: TextCapitalization.words,
-                ),
-                const SizedBox(height: 14),
-              ],
+              // Inscription masquée pour le moment
               // Email field
               _buildField(
                 controller: _emailCtrl,
@@ -502,7 +502,6 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 label: 'Mot de passe',
                 icon: Icons.lock_outline_rounded,
                 obscure: _isSignUpMode ? _obscureSignUpPass : _obscurePass,
-                onChanged: _isSignUpMode ? (_) => setState(() {}) : null,
                 suffixIcon: GestureDetector(
                   onTap: () => setState(() {
                     if (_isSignUpMode) {
@@ -520,10 +519,6 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   ),
                 ),
               ),
-              if (_isSignUpMode) ...[
-                const SizedBox(height: 12),
-                _buildPasswordRules(),
-              ],
               const SizedBox(height: 24),
 
               // Sign in button
@@ -573,36 +568,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                 _buildGoogleBtn(),
               ],
               const SizedBox(height: 18),
-              Center(
-                child: Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 4,
-                  children: [
-                    Text(
-                      _isSignUpMode ? 'Déjà un compte ?' : 'Pas de compte ?',
-                      style: TextStyle(
-                        fontSize: 12.5,
-                        color: isLightTheme
-                            ? const Color(0xFF7A8197)
-                            : _C.gray500,
-                      ),
-                    ),
-                    GestureDetector(
-                      onTap: _isLoading ? null : _toggleMode,
-                      child: Text(
-                        _isSignUpMode
-                            ? 'Se connecter ici'
-                            : 'Créer un compte ici',
-                        style: const TextStyle(
-                          fontSize: 12.5,
-                          fontWeight: FontWeight.w700,
-                          color: _C.v500,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
+              // Inscription masquée pour le moment
             ],
           ),
         ),
@@ -693,77 +659,6 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
     Navigator.of(context).pop(message);
   }
 
-  Widget _buildPasswordRules() {
-    final isLightTheme = Theme.of(context).brightness == Brightness.light;
-    final password = _passCtrl.text;
-    final rules = <MapEntry<bool, String>>[
-      MapEntry(password.length >= 8, '8 caractères minimum'),
-      MapEntry(RegExp(r'[A-Z]').hasMatch(password), 'Une majuscule'),
-      MapEntry(RegExp(r'[a-z]').hasMatch(password), 'Une minuscule'),
-      MapEntry(RegExp(r'\d').hasMatch(password), 'Un chiffre'),
-      MapEntry(RegExp(r'[^A-Za-z0-9]').hasMatch(password), 'Un caractère spécial'),
-    ];
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: isLightTheme
-            ? const Color(0xFFF8F9FD)
-            : Colors.white.withOpacity(0.04),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(
-          color: isLightTheme
-              ? const Color(0xFFE4E8F2)
-              : Colors.white.withOpacity(0.08),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Mot de passe robuste',
-            style: TextStyle(
-              fontSize: 12.5,
-              fontWeight: FontWeight.w700,
-              color: isLightTheme ? const Color(0xFF1B1F2A) : _C.white,
-            ),
-          ),
-          const SizedBox(height: 8),
-          ...rules.map(
-            (rule) => Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                children: [
-                  Icon(
-                    rule.key
-                        ? Icons.check_circle_rounded
-                        : Icons.radio_button_unchecked_rounded,
-                    size: 16,
-                    color: rule.key
-                        ? const Color(0xFF10B981)
-                        : (isLightTheme
-                            ? const Color(0xFF8A90A3)
-                            : _C.gray500),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    rule.value,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: isLightTheme
-                          ? const Color(0xFF58617A)
-                          : _C.gray500,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
   // ─────────────────────────────────────────
   //  Sign In Button
   // ─────────────────────────────────────────
@@ -834,7 +729,7 @@ class _AuthScreenState extends State<AuthScreen> with TickerProviderStateMixin {
                   ],
                 )
               : Text(
-                  _isSignUpMode ? 'Créer le compte' : 'Se connecter',
+                  'Se connecter',
                   style: TextStyle(
                     color: _C.white,
                     fontWeight: FontWeight.w700,

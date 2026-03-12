@@ -17,6 +17,7 @@ import '../services/download_service.dart';
 import '../services/listening_sync_service.dart';
 import '../services/push_notification_service.dart';
 import '../services/support_service.dart';
+import '../services/auth_callback_service.dart';
 import '../services/supabase_service.dart';
 import '../services/tutorial_service.dart';
 import 'NowPlayingScreen.dart';
@@ -62,11 +63,13 @@ class _C {
 class HomeScreen extends StatefulWidget {
   final ThemeMode themeMode;
   final ValueChanged<ThemeMode>? onThemeModeChanged;
+  final Future<void>? startupFuture;
 
   const HomeScreen({
     super.key,
     this.themeMode = ThemeMode.system,
     this.onThemeModeChanged,
+    this.startupFuture,
   });
 
   @override
@@ -108,9 +111,10 @@ class _HomeScreenState extends State<HomeScreen>
   final FocusNode _searchFocusNode = FocusNode();
   final GlobalKey<ScaffoldState> _scaffoldKey = GlobalKey<ScaffoldState>();
 
+  StreamSubscription<AuthState>? _authSubscription;
+  StreamSubscription<String>? _authCallbackSubscription;
   StreamSubscription<bool>? _notificationClickSubscription;
   RealtimeChannel? _songViewsChannel;
-  Timer? _songViewsPollTimer;
   Timer? _songsReloadTimer;
   Timer? _connectivityTimer;
   bool _isSilentSongRefreshRunning = false;
@@ -147,10 +151,21 @@ class _HomeScreenState extends State<HomeScreen>
     _entranceCtrl.forward();
 
     _handler.addListener(_onAudioHandlerChanged);
+    _attachAuthListener();
+    _attachAuthCallbackListener();
     _attachNotificationClickListener();
     unawaited(_attachSongViewsRealtime());
-    _startSongViewsPollingFallback();
     _startConnectivityMonitor();
+
+    widget.startupFuture?.whenComplete(() {
+      if (!mounted) return;
+      _attachAuthListener();
+      _attachAuthCallbackListener();
+      // Supabase becomes available only after bootstrap. Re-attach and refresh.
+      unawaited(_attachSongViewsRealtime());
+      unawaited(_refreshSongsSilently(force: true));
+    });
+
     _bootstrap();
   }
 
@@ -202,12 +217,13 @@ class _HomeScreenState extends State<HomeScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _authSubscription?.cancel();
+    _authCallbackSubscription?.cancel();
     _notificationClickSubscription?.cancel();
     if (_songViewsChannel != null) {
       unawaited(SupabaseService.client.removeChannel(_songViewsChannel!));
       _songViewsChannel = null;
     }
-    _songViewsPollTimer?.cancel();
     _songsReloadTimer?.cancel();
     _connectivityTimer?.cancel();
     _handler.removeListener(_onAudioHandlerChanged);
@@ -222,6 +238,38 @@ class _HomeScreenState extends State<HomeScreen>
     if (state == AppLifecycleState.resumed) {
       unawaited(_maybePromptSupportReturn());
     }
+  }
+
+  void _attachAuthListener() {
+    _authSubscription?.cancel();
+    _authSubscription = null;
+
+    if (!SupabaseService.isEnabled) return;
+
+    _authSubscription = SupabaseService.client.auth.onAuthStateChange.listen(
+      (state) {
+        if (!mounted) return;
+        final e = state.event;
+        if (e == AuthChangeEvent.signedIn ||
+            e == AuthChangeEvent.signedOut ||
+            e == AuthChangeEvent.tokenRefreshed ||
+            e == AuthChangeEvent.userUpdated) {
+          setState(() {});
+        }
+      },
+      onError: (_) {},
+    );
+  }
+
+  void _attachAuthCallbackListener() {
+    _authCallbackSubscription?.cancel();
+    _authCallbackSubscription = AuthCallbackService.instance.confirmationStream
+        .listen((message) {
+      if (!mounted) return;
+      _showSnack(message);
+      unawaited(_loadUserData());
+      unawaited(_refreshSongsSilently(force: true));
+    });
   }
 
   void _attachNotificationClickListener() {
@@ -455,7 +503,7 @@ class _HomeScreenState extends State<HomeScreen>
                     ),
                     const SizedBox(height: 16),
                     Text(
-                      'Si la musique te parle, un abonnement, un partage ou un commentaire aide 2Block \u00e0 continuer \u00e0 cr\u00e9er.',
+                      '\u{1F3B5} Si cette musique vous touche, soutenez l\u2019artiste.\n\nCr\u00e9er de la musique demande du temps, du travail et beaucoup de passion.\nVotre soutien, m\u00eame petit, aide l\u2019artiste \u00e0 continuer \u00e0 cr\u00e9er.\n\n\u{2764}\u{FE0F} Faites un geste et participez \u00e0 l\u2019aventure.',
                       style: TextStyle(
                         fontSize: 14,
                         height: 1.45,
@@ -463,22 +511,6 @@ class _HomeScreenState extends State<HomeScreen>
                             ? const Color(0xFF444E67)
                             : _C.gray400,
                       ),
-                    ),
-                    const SizedBox(height: 14),
-                    _tutorialRow(
-                      icon: Icons.subscriptions_rounded,
-                      text:
-                          'Un abonnement YouTube aide \u00e0 faire monter les prochains titres.',
-                    ),
-                    _tutorialRow(
-                      icon: Icons.share_rounded,
-                      text:
-                          'Un partage ou un commentaire donne de la force \u00e0 l\'artiste.',
-                    ),
-                    _tutorialRow(
-                      icon: Icons.volunteer_activism_rounded,
-                      text:
-                          'Tu peux le faire quand tu veux, sans pression.',
                     ),
                     const SizedBox(height: 18),
                     Row(
@@ -1252,7 +1284,7 @@ class _HomeScreenState extends State<HomeScreen>
             featuredCount == 0 ? 0 : (_featuredIndex % featuredCount);
         _applyFiltersAndSort(_searchController.text);
       });
-      await _handler.refreshSongs();
+      _handler.replaceSongs(data);
     } catch (_) {
       if (!mounted) return;
       setState(() {
@@ -1438,7 +1470,7 @@ class _HomeScreenState extends State<HomeScreen>
       _downloadProgressBySongId[song.id] = 0;
     });
     try {
-      await _downloadService.downloadSong(
+      final localPath = await _downloadService.downloadSong(
         song,
         onProgress: (receivedBytes, totalBytes) {
           if (!mounted) return;
@@ -1450,26 +1482,19 @@ class _HomeScreenState extends State<HomeScreen>
           });
         },
       );
-      final localPath = await _downloadService.getLocalPathForSong(song.id);
       if (!mounted) return;
+      final downloadedSong = song.copyWith(localPath: localPath);
       setState(() {
         songs = songs
             .map((s) => s.id == song.id
-                ? s.copyWith(localPath: localPath ?? s.localPath)
+                ? s.copyWith(localPath: localPath)
                 : s)
             .toList();
         _applyFiltersAndSort(_searchController.text);
       });
-      await _loadSongs();
+      _handler.replaceSongs(songs);
       if (!mounted) return;
       if (autoPlayAfterDownload) {
-        var downloadedSong = song;
-        for (final item in songs) {
-          if (item.id == song.id) {
-            downloadedSong = item;
-            break;
-          }
-        }
         await _handler.playSong(downloadedSong);
       }
     } catch (_) {
@@ -1512,14 +1537,6 @@ class _HomeScreenState extends State<HomeScreen>
         .subscribe();
   }
 
-  void _startSongViewsPollingFallback() {
-    if (!SupabaseService.isEnabled) return;
-    _songViewsPollTimer?.cancel();
-    _songViewsPollTimer = Timer.periodic(const Duration(seconds: 15), (_) {
-      unawaited(_refreshSongsSilently());
-    });
-  }
-
   void _scheduleSilentSongsReload([
     Duration delay = const Duration(milliseconds: 900),
   ]) {
@@ -1544,7 +1561,7 @@ class _HomeScreenState extends State<HomeScreen>
         songs = data;
         _applyFiltersAndSort(_searchController.text);
       });
-      await _handler.refreshSongs();
+      _handler.replaceSongs(data);
     } catch (_) {
       // Silent refresh fallback should never interrupt UI.
     } finally {
@@ -1629,6 +1646,7 @@ class _HomeScreenState extends State<HomeScreen>
   // Ã¢â€â‚¬Ã¢â€â‚¬ Helpers Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬Ã¢â€â‚¬
   void _showSnack(String msg) {
     final isLightTheme = Theme.of(context).brightness == Brightness.light;
+    final topInset = MediaQuery.of(context).padding.top;
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(
         msg,
@@ -1639,6 +1657,7 @@ class _HomeScreenState extends State<HomeScreen>
       ),
       backgroundColor: isLightTheme ? Colors.white : const Color(0xFF1a1a2e),
       behavior: SnackBarBehavior.floating,
+      margin: EdgeInsets.fromLTRB(16, topInset + 12, 16, 0),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
         side: BorderSide(
@@ -3772,7 +3791,7 @@ class _AboutSheet extends StatelessWidget {
                             color: Colors.white)),
                   ),
                   const SizedBox(height: 4),
-                  Text('Version 1.2.1',
+                  Text('Version 1.3.1',
                       style: TextStyle(
                         fontSize: 13,
                         color:

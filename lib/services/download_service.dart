@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:http/http.dart' as http;
@@ -11,9 +12,25 @@ import 'supabase_service.dart';
 
 class DownloadService {
   static const String _bucketName = 'songs-private';
-  static const String _appVersion = '1.2.1+3';
+  static const String _appVersion = '1.3.1+4';
+  static final http.Client _httpClient = http.Client();
+  static Map<int, String>? _downloadedMapCache;
+  static DateTime? _downloadedMapCachedAt;
+  static const Duration _downloadedMapCacheTtl = Duration(minutes: 3);
 
-  Future<Map<int, String>> getDownloadedMap() async {
+  Future<Map<int, String>> getDownloadedMap({
+    bool forceRefresh = false,
+    bool verifyFiles = false,
+  }) async {
+    final now = DateTime.now();
+    if (!forceRefresh &&
+        !verifyFiles &&
+        _downloadedMapCache != null &&
+        _downloadedMapCachedAt != null &&
+        now.difference(_downloadedMapCachedAt!) < _downloadedMapCacheTtl) {
+      return Map<int, String>.from(_downloadedMapCache!);
+    }
+
     final db = await AppStateDb.database;
     final rows = await db.query('downloads');
     final map = <int, String>{};
@@ -21,18 +38,30 @@ class DownloadService {
     for (final row in rows) {
       final songId = (row['song_id'] as num).toInt();
       final localPath = (row['local_path'] ?? '').toString();
-      final exists = await File(localPath).exists();
-      if (exists) {
-        map[songId] = localPath;
+      if (localPath.isEmpty) continue;
+      if (verifyFiles) {
+        final exists = await File(localPath).exists();
+        if (exists) {
+          map[songId] = localPath;
+        } else {
+          await db.delete('downloads', where: 'song_id = ?', whereArgs: [songId]);
+        }
       } else {
-        await db.delete('downloads', where: 'song_id = ?', whereArgs: [songId]);
+        map[songId] = localPath;
       }
     }
 
+    _downloadedMapCache = Map<int, String>.from(map);
+    _downloadedMapCachedAt = now;
     return map;
   }
 
   Future<String?> getLocalPathForSong(int songId) async {
+    final cachedPath = _downloadedMapCache?[songId];
+    if (cachedPath != null && cachedPath.isNotEmpty) {
+      return cachedPath;
+    }
+
     final db = await AppStateDb.database;
     final rows = await db.query(
       'downloads',
@@ -41,10 +70,16 @@ class DownloadService {
       limit: 1,
     );
     if (rows.isEmpty) return null;
-    return (rows.first['local_path'] ?? '').toString();
+    final localPath = (rows.first['local_path'] ?? '').toString();
+    if (localPath.isNotEmpty) {
+      _downloadedMapCache ??= <int, String>{};
+      _downloadedMapCache![songId] = localPath;
+      _downloadedMapCachedAt = DateTime.now();
+    }
+    return localPath;
   }
 
-  Future<void> downloadSong(
+  Future<String> downloadSong(
     Song song, {
     void Function(int receivedBytes, int totalBytes)? onProgress,
   }) async {
@@ -74,11 +109,30 @@ class DownloadService {
     final localPath = p.join(songsDir.path, '${song.id}$ext');
     final file = File(localPath);
 
-    final client = http.Client();
     IOSink? sink;
+    final progressWatch = Stopwatch()..start();
+    var lastProgressBytes = 0;
+    var lastProgressMs = -1000;
+
+    void emitProgress(int receivedBytes, int totalBytes, {bool force = false}) {
+      if (onProgress == null) return;
+
+      final nowMs = progressWatch.elapsedMilliseconds;
+      if (!force && totalBytes > 0 && receivedBytes < totalBytes) {
+        final deltaBytes = receivedBytes - lastProgressBytes;
+        if (deltaBytes < 96 * 1024 && (nowMs - lastProgressMs) < 120) {
+          return;
+        }
+      }
+
+      lastProgressBytes = receivedBytes;
+      lastProgressMs = nowMs;
+      onProgress(receivedBytes, totalBytes);
+    }
+
     try {
       final request = http.Request('GET', Uri.parse(signedUrl));
-      final response = await client.send(request);
+      final response = await _httpClient.send(request);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw Exception('Telechargement impossible (${response.statusCode})');
       }
@@ -89,19 +143,23 @@ class DownloadService {
 
       final totalBytes = response.contentLength ?? 0;
       int receivedBytes = 0;
-      onProgress?.call(0, totalBytes);
+      emitProgress(0, totalBytes, force: true);
 
       sink = file.openWrite();
       await for (final chunk in response.stream) {
         sink.add(chunk);
         receivedBytes += chunk.length;
-        onProgress?.call(receivedBytes, totalBytes);
+        emitProgress(receivedBytes, totalBytes);
       }
 
       await sink.flush();
       await sink.close();
       sink = null;
-      onProgress?.call(totalBytes > 0 ? totalBytes : receivedBytes, totalBytes);
+      emitProgress(
+        totalBytes > 0 ? totalBytes : receivedBytes,
+        totalBytes,
+        force: true,
+      );
     } catch (_) {
       try {
         if (sink != null) {
@@ -114,8 +172,6 @@ class DownloadService {
         }
       } catch (_) {}
       rethrow;
-    } finally {
-      client.close();
     }
 
     final db = await AppStateDb.database;
@@ -128,9 +184,17 @@ class DownloadService {
       },
       conflictAlgorithm: ConflictAlgorithm.replace,
     );
+    _downloadedMapCache ??= <int, String>{};
+    _downloadedMapCache![song.id] = localPath;
+    _downloadedMapCachedAt = DateTime.now();
 
-    await _registerDownloadWithFallback(
-        songId: song.id, userId: SupabaseService.currentUser!.id);
+    unawaited(
+      _registerDownloadWithFallback(
+        songId: song.id,
+        userId: SupabaseService.currentUser!.id,
+      ),
+    );
+    return localPath;
   }
 
   Future<void> syncPendingDownloadRegistrations() async {
@@ -212,6 +276,13 @@ class DownloadService {
     } catch (_) {
       // Non-blocking cleanup.
     }
+
+    _downloadedMapCache = <int, String>{};
+    _downloadedMapCachedAt = DateTime.now();
+  }
+
+  Future<void> validateDownloadedMapCache() async {
+    await getDownloadedMap(forceRefresh: true, verifyFiles: true);
   }
 
   Future<void> _registerDownloadWithFallback({

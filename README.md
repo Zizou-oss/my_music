@@ -2,9 +2,24 @@
 
 Application mobile Flutter avec back-office web admin, base de données Supabase, téléchargement de morceaux (pas de streaming), écoute offline, et traçabilité complète des écoutes.
 
+Version mobile actuelle: 1.3.1+4
+
+## 0. Fonctionnalités mobiles actuelles
+
+- Auth email (session persistée)
+- Catalogue dynamique des sons publiés
+- Téléchargement privé (pas d’accès fichier utilisateur)
+- Lecture offline
+- Sync des écoutes offline
+- Likes (coeur = favoris)
+- Commentaires sur les sons
+- Notifications push (nouveau son + mise à jour)
+- Écran "Soutenir l’artiste" (USSD) + déclaration en base
+- Tutoriel lecteur (première ouverture)
+
 ## 1. Objectif
 
-Passer d'une app locale (assets) à une plateforme dynamique:
+Plateforme dynamique en production:
 - Admin ajoute les sons depuis un web admin
 - Les sons sont stockés et indexés côté Supabase
 - L'app affiche automatiquement les nouveaux sons publiés
@@ -20,13 +35,14 @@ Passer d'une app locale (assets) à une plateforme dynamique:
 - Téléchargement réservé aux utilisateurs authentifiés.
 - Traçabilité admin: qui écoute quoi, quand, combien de temps, et cumul par son.
 
-## 3. Architecture cible
+## 3. Architecture
 
 Composants:
 - App mobile: Flutter
 - Backend: Supabase (PostgreSQL + Auth + Storage + Edge Functions)
-- Web Admin: Flutter Web ou React (recommandé), connecté à Supabase
+- Web Admin: React (Vite), connecté à Supabase
 - Stockage audio: Supabase Storage (bucket privé)
+- Edge Functions: URL signées + push-broadcast
 
 Flux global:
 1. Admin upload un son dans le Web Admin
@@ -99,6 +115,17 @@ Tables recommandées:
 - `listeners_count int`
 - `seconds_total bigint`
 
+### Tables sociales & support
+- `song_likes` (favoris/likes)
+- `song_comments` (commentaires)
+- `support_declarations` (déclarations de soutien)
+
+### Config & métriques publiques
+- `app_settings` (release mobile, notes, urls)
+- `push_tokens` (FCM tokens)
+- `site_download_events` (téléchargements via site)
+- `listening_events_daily` (agrégats journaliers)
+
 ## 6. Storage audio (sécurité)
 
 Bucket:
@@ -137,6 +164,15 @@ Important:
 - Si non téléchargé: proposer "Télécharger".
 - Aucun flux distant en direct.
 
+### Social & soutien
+- Likes = favoris (coeur).
+- Commentaires disponibles dans le lecteur.
+- Écran "Soutenir l'artiste" (USSD) + déclaration en base.
+
+### Notifications push
+- Topics: `song_updates`, `app_updates`
+- Envoi depuis le Web Admin (Edge Function `push-broadcast`)
+
 ### Offline
 - Si fichier local présent: écoute possible sans réseau.
 - Les événements d'écoute sont mis en queue locale.
@@ -162,6 +198,10 @@ Anti-doublons:
 - `session_id` unique par session d'écoute
 - contrainte d'unicité côté serveur sur `(user_id, song_id, session_id)`
 
+Agrégats:
+- `songs.plays_count` consolidé côté backend
+- `listening_events_daily` pour les graphiques journaliers
+
 ## 9. Web Admin
 
 Fonctions minimales:
@@ -170,6 +210,10 @@ Fonctions minimales:
 - Publication/dépublication
 - Vue des téléchargements
 - Vue des écoutes détaillées
+- Modération des commentaires/likes
+- Envoi des notifications push
+- Publication de la release mobile
+ - KPIs + graphiques (journaliers + top songs)
 
 Dashboard recommandé:
 - KPIs globaux:
@@ -241,10 +285,15 @@ flutter build appbundle --release
 ## 15. État actuel vs cible
 
 État actuel:
-- catalogue local via `assets/songs.json` + fichiers embarqués
+- Catalogue Supabase + publication depuis Web Admin
+- Téléchargement offline + tracking sync
+- Likes/Commentaires + Soutien artiste
+- Push notifications (FCM)
+- Dashboard admin (KPIs + graphiques)
 
 Cible:
-- catalogue dynamique Supabase + admin web + download sécurisé + tracking avancé
+- Améliorer cache audio et monitoring
+- Optimiser encore les temps de téléchargement
 
 ---
 

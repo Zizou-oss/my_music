@@ -18,7 +18,9 @@ class ListeningSyncService {
   StreamSubscription<List<ConnectivityResult>>? _connectivitySubscription;
   DateTime? _lastOfflineCheckAt;
   bool _lastOfflineCheckValue = true;
+  int _onlineValidationFailureCount = 0;
   static const Duration _offlineCheckCacheTtl = Duration(seconds: 8);
+  static const int _requiredValidationFailuresForOffline = 2;
 
   void _cacheOfflineState(bool isOffline) {
     _lastOfflineCheckAt = DateTime.now();
@@ -29,6 +31,7 @@ class ListeningSyncService {
     _connectivitySubscription ??=
         Connectivity().onConnectivityChanged.listen((results) async {
       if (results.contains(ConnectivityResult.none)) {
+        _onlineValidationFailureCount = 0;
         _cacheOfflineState(true);
         return;
       }
@@ -56,12 +59,14 @@ class ListeningSyncService {
 
     final results = await Connectivity().checkConnectivity();
     if (results.contains(ConnectivityResult.none)) {
+      _onlineValidationFailureCount = 0;
       _cacheOfflineState(true);
       return true;
     }
 
     // Connectivity != Internet. Validate with a small Supabase reachability ping.
     if (!SupabaseService.isEnabled) {
+      _onlineValidationFailureCount = 0;
       _cacheOfflineState(false);
       return false;
     }
@@ -73,12 +78,17 @@ class ListeningSyncService {
           .eq('is_published', true)
           .limit(1)
           .maybeSingle()
-          .timeout(const Duration(seconds: 3));
+          .timeout(const Duration(seconds: 5));
+      _onlineValidationFailureCount = 0;
       _cacheOfflineState(false);
       return false;
     } catch (_) {
-      _cacheOfflineState(true);
-      return true;
+      _onlineValidationFailureCount += 1;
+      final shouldMarkOffline =
+          _onlineValidationFailureCount >=
+          _requiredValidationFailuresForOffline;
+      _cacheOfflineState(shouldMarkOffline);
+      return shouldMarkOffline;
     }
   }
 

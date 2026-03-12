@@ -57,12 +57,20 @@ class AudioHandler extends ChangeNotifier {
 
   Future<void> refreshSongs() async {
     _songs = await _songRepository.getSongs();
+    _refreshCurrentSongReference();
+    notifyListeners();
+  }
+
+  void replaceSongs(List<Song> songs) {
+    _songs = List<Song>.from(songs);
+    _refreshCurrentSongReference();
     notifyListeners();
   }
 
   Future<void> _ensureSongsLoaded() async {
     if (_songs.isNotEmpty) return;
     _songs = await _songRepository.getSongs();
+    _refreshCurrentSongReference();
   }
 
   Future<void> playSong(Song song) async {
@@ -76,6 +84,7 @@ class AudioHandler extends ChangeNotifier {
     if (!_isPlayable(resolved)) {
       // Retry once with a fresh catalog for recent download state changes.
       _songs = await _songRepository.getSongs();
+      _refreshCurrentSongReference();
       resolved = _songs.firstWhere(
         (s) => s.id == song.id,
         orElse: () => song,
@@ -322,6 +331,15 @@ class AudioHandler extends ChangeNotifier {
       unawaited(_rolloverListeningSessionForTrackChange());
     }
     notifyListeners();
+  }
+
+  void _refreshCurrentSongReference() {
+    final currentId = currentSong?.id;
+    if (currentId == null) return;
+    final updatedIndex = _songs.indexWhere((song) => song.id == currentId);
+    if (updatedIndex >= 0) {
+      currentSong = _songs[updatedIndex];
+    }
   }
 
   Future<void> _rolloverListeningSessionForTrackChange() async {

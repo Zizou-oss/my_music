@@ -240,7 +240,7 @@ class _SplashScreenState extends State<SplashScreen>
             child: FadeTransition(
               opacity: _textFade,
               child: const Text(
-                'v1.2.1',
+                'v1.3.1',
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: 11,

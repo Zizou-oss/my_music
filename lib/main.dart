@@ -15,13 +15,14 @@ import 'player/audio_handler.dart';
 import 'config/supabase_config.dart';
 import 'firebase_options.dart';
 import 'services/announcement_notification_service.dart';
+import 'services/auth_callback_service.dart';
 import 'services/download_service.dart';
 import 'services/listening_sync_service.dart';
 import 'services/push_notification_service.dart';
 
 final AudioHandler audioHandler = AudioHandler();
 const String _themeModePrefKey = 'app_theme_mode';
-const String _appVersionLabel = 'v1.2.1';
+const String _appVersionLabel = 'v1.3.1';
 const String _splashDeveloperLabel = 'Developper par THIOMBIANO TECH';
 const String _thiombianoLogoAsset = 'assets/images/thiombiano-tech.png';
 const String _cdBackdropAsset = 'assets/images/cd_lecture.jpg';
@@ -121,18 +122,7 @@ Future<void> _postLaunchInit() async {
   }
 }
 
-Future<void> _bootstrapAppServices() async {
-  if (SupabaseConfig.isConfigured) {
-    try {
-      await Supabase.initialize(
-        url: SupabaseConfig.url,
-        anonKey: SupabaseConfig.anonKey,
-      ).timeout(const Duration(seconds: 8));
-    } catch (e) {
-      debugPrint('main: Supabase init skipped: $e');
-    }
-  }
-
+Future<void> _bootstrapDeferredServices() async {
   if (!kIsWeb) {
     try {
       if (Firebase.apps.isEmpty) {
@@ -162,8 +152,24 @@ Future<void> _bootstrapAppServices() async {
     debugPrint('main: audio background skipped: $e');
   }
 
-  // Network-dependent tasks run in background so splash is never blocked.
-  unawaited(_postLaunchInit());
+  await _postLaunchInit();
+}
+
+ Future<void> _bootstrapCriticalServices() async {
+  if (SupabaseConfig.isConfigured) {
+    try {
+      await Supabase.initialize(
+        url: SupabaseConfig.url,
+        anonKey: SupabaseConfig.anonKey,
+        authOptions: const FlutterAuthClientOptions(detectSessionInUri: false),
+      ).timeout(const Duration(seconds: 8));
+
+      // If the app was opened via an auth callback link, replay it now.
+      await AuthCallbackService.instance.onSupabaseReady();
+    } catch (e) {
+      debugPrint('main: Supabase init skipped: $e');
+    }
+  }
 }
 
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
@@ -171,6 +177,7 @@ Future<void> _bootstrapAppServices() async {
 // â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  unawaited(AuthCallbackService.instance.start());
   runApp(const MyApp());
 }
 
@@ -191,7 +198,8 @@ class _MyAppState extends State<MyApp> {
   @override
   void initState() {
     super.initState();
-    _startupFuture = _bootstrapAppServices();
+    _startupFuture = _bootstrapCriticalServices();
+    unawaited(_startupFuture.whenComplete(_bootstrapDeferredServices));
     _restoreThemeMode();
   }
 
@@ -262,12 +270,12 @@ class _StartupGateState extends State<StartupGate> {
     super.initState();
     _readyFuture = Future.wait<void>([
       widget.startupFuture.timeout(
-        const Duration(seconds: 10),
+        const Duration(seconds: 3),
         onTimeout: () {
           debugPrint('main: startup timeout, continue to home');
         },
       ),
-      Future<void>.delayed(const Duration(milliseconds: 2000)),
+      Future<void>.delayed(const Duration(seconds: 3)),
     ]);
   }
 
@@ -319,16 +327,20 @@ class _WelcomeSplashState extends State<_WelcomeSplash>
     super.initState();
 
     _entranceCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 800));
+      vsync: this,
+      duration: const Duration(milliseconds: 800),
+    );
     _fade = CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOut);
     _slide = Tween<Offset>(begin: const Offset(0, 0.06), end: Offset.zero)
         .animate(
-            CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOutCubic));
+      CurvedAnimation(parent: _entranceCtrl, curve: Curves.easeOutCubic),
+    );
     _entranceCtrl.forward();
 
     _dotsCtrl = AnimationController(
-        vsync: this, duration: const Duration(milliseconds: 900))
-      ..repeat();
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat();
   }
 
   @override
@@ -371,7 +383,6 @@ class _WelcomeSplashState extends State<_WelcomeSplash>
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        // â”€â”€ Logo dans cercle avec glow â”€â”€
                         const SizedBox(height: 8),
                         ShaderMask(
                           shaderCallback: (b) => _C.gradMain.createShader(b),
@@ -386,9 +397,7 @@ class _WelcomeSplashState extends State<_WelcomeSplash>
                             ),
                           ),
                         ),
-
                         const SizedBox(height: 10),
-
                         const Text(
                           'MUSIC',
                           textAlign: TextAlign.center,
@@ -405,14 +414,9 @@ class _WelcomeSplashState extends State<_WelcomeSplash>
                             ],
                           ),
                         ),
-
                         const SizedBox(height: 46),
-
-                        // â”€â”€ 3 dots loader â”€â”€
                         _buildDots(),
-
                         const SizedBox(height: 14),
-
                         const Text(
                           'Chargement...',
                           style: TextStyle(
@@ -454,7 +458,6 @@ class _WelcomeSplashState extends State<_WelcomeSplash>
     );
   }
 
-  // â”€â”€ Logo â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _buildSignature() {
     return Row(
       mainAxisSize: MainAxisSize.min,
@@ -527,7 +530,11 @@ class _WelcomeSplashState extends State<_WelcomeSplash>
           opacity: low,
           child: Transform.rotate(
             angle: 0.08,
-            child: const Icon(Icons.speaker_rounded, size: 82, color: _C.v400),
+            child: const Icon(
+              Icons.speaker_rounded,
+              size: 82,
+              color: _C.v400,
+            ),
           ),
         ),
       ),
@@ -623,7 +630,6 @@ class _WelcomeSplashState extends State<_WelcomeSplash>
     );
   }
 
-  // Loading dots
   Widget _buildDots() {
     return AnimatedBuilder(
       animation: _dotsCtrl,
@@ -656,7 +662,6 @@ class _WelcomeSplashState extends State<_WelcomeSplash>
     );
   }
 
-  // â”€â”€ Blob â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   Widget _blob(double size, Color color) => Container(
         width: size,
         height: size,

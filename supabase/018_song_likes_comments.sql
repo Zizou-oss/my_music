@@ -130,9 +130,9 @@ begin
     where sl.song_id = p_song_id
       and sl.user_id = v_user_id
   ) then
-    delete from public.song_likes
-    where song_id = p_song_id
-      and user_id = v_user_id;
+    delete from public.song_likes sl
+    where sl.song_id = p_song_id
+      and sl.user_id = v_user_id;
     v_liked := false;
   else
     insert into public.song_likes (song_id, user_id)
@@ -144,8 +144,16 @@ begin
   select
     p_song_id,
     v_liked,
-    (select count(*)::bigint from public.song_likes where song_id = p_song_id),
-    (select count(*)::bigint from public.song_comments where song_id = p_song_id);
+    (
+      select count(*)::bigint
+      from public.song_likes sl
+      where sl.song_id = p_song_id
+    ),
+    (
+      select count(*)::bigint
+      from public.song_comments sc
+      where sc.song_id = p_song_id
+    );
 end;
 $$;
 

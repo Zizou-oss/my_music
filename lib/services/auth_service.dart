@@ -1,5 +1,6 @@
 import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../config/supabase_config.dart';
@@ -15,6 +16,44 @@ class AuthService {
       return Stream<AuthState>.empty();
     }
     return SupabaseService.client.auth.onAuthStateChange;
+  }
+
+  Future<String?> checkSignupAvailability({
+    required String email,
+    String? fullName,
+  }) async {
+    if (!isEnabled) return null;
+    final trimmedEmail = email.trim();
+    final trimmedName = fullName?.trim();
+    if (trimmedEmail.isEmpty && (trimmedName == null || trimmedName.isEmpty)) {
+      return null;
+    }
+
+    try {
+      final rows = await SupabaseService.client
+          .rpc(
+            'check_signup_availability',
+            params: <String, dynamic>{
+              'p_email': trimmedEmail,
+              'p_full_name': trimmedName ?? '',
+            },
+          )
+          .timeout(const Duration(seconds: 5));
+
+      final row = (rows as List<dynamic>).cast<Map<String, dynamic>>().first;
+      final emailTaken = row['email_taken'] == true;
+      final nameTaken = row['full_name_taken'] == true;
+      if (emailTaken) {
+        return 'Cet email est déjà utilisé.';
+      }
+      if (trimmedName != null && trimmedName.isNotEmpty && nameTaken) {
+        return 'Ce nom est déjà utilisé.';
+      }
+      return null;
+    } catch (e) {
+      debugPrint('AuthService.checkSignupAvailability failed: $e');
+      return null;
+    }
   }
 
   Future<String?> signUp({
